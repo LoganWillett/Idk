@@ -1,0 +1,954 @@
+import bpy
+import math
+
+# ------------------------------
+# Body Part Creation Functions
+# ------------------------------
+
+def create_torso(height, chest_circumference, waist_circumference, hip_circumference, leg_length):
+    """
+    Creates the torso mesh based on anthropometric measurements.
+    """
+    # Calculate torso dimensions
+    torso_height = height * 0.35
+    torso_radius = chest_circumference / (2 * math.pi)
+    
+    # Create Torso Mesh
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=32,
+        radius=torso_radius / 2,
+        depth=torso_height,
+        location=(0, 0, torso_height / 2 + leg_length)
+    )
+    torso = bpy.context.active_object
+    torso.name = "Torso"
+    return torso
+
+def create_limb(name, length, radius, location):
+    """
+    Creates a limb (arm or leg) as a cylinder.
+    """
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=16,
+        radius=radius,
+        depth=length,
+        location=location
+    )
+    limb = bpy.context.active_object
+    limb.name = name
+    return limb
+
+def create_hand(name, location, length, width):
+    """
+    Creates a hand as a scaled cube.
+    """
+    bpy.ops.mesh.primitive_cube_add(
+        size=1,
+        location=location
+    )
+    hand = bpy.context.active_object
+    hand.name = name
+    hand.scale = (width, width, length)
+    return hand
+
+def create_foot(name, location, length, width):
+    """
+    Creates a foot as a scaled cube.
+    """
+    bpy.ops.mesh.primitive_cube_add(
+        size=1,
+        location=location
+    )
+    foot = bpy.context.active_object
+    foot.name = name
+    foot.scale = (length, width, width / 2)
+    return foot
+
+def create_head(circumference, location):
+    """
+    Creates the head as a UV sphere based on head circumference.
+    """
+    head_radius = circumference / (2 * math.pi)
+    bpy.ops.mesh.primitive_uv_sphere_add(
+        radius=head_radius,
+        location=location
+    )
+    head = bpy.context.active_object
+    head.name = "Head"
+    return head
+
+# ------------------------------
+# Suit Layer Functions
+# ------------------------------
+
+def add_suit_layer(base_object, thickness, layer_name):
+    """
+    Adds a suit layer by duplicating the base object and applying a Solidify modifier.
+    """
+    layer = base_object.copy()
+    layer.data = base_object.data.copy()
+    bpy.context.collection.objects.link(layer)
+    layer.name = layer_name
+    
+    # Add Solidify Modifier
+    solidify_mod = layer.modifiers.new(name='Solidify', type='SOLIDIFY')
+    solidify_mod.thickness = thickness
+    solidify_mod.offset = 1  # Extrude outwards
+    
+    # Apply the modifier
+    bpy.context.view_layer.objects.active = layer
+    bpy.ops.object.modifier_apply(modifier='Solidify')
+    
+    return layer
+
+# ------------------------------
+# Sensor and Wiring Functions
+# ------------------------------
+
+def add_sensor(name, location, radius=0.005, color=(1, 0, 0, 1)):
+    """
+    Adds a sensor as a UV sphere at the specified location.
+    """
+    bpy.ops.mesh.primitive_uv_sphere_add(
+        radius=radius,
+        location=location
+    )
+    sensor = bpy.context.active_object
+    sensor.name = name
+    
+    # Create and assign material
+    mat = create_material(
+        name=f"{name}Material",
+        diffuse_color=color,
+        metallic=0.0,
+        roughness=0.5,
+        transparency=0.0,
+        emission_color=color if 'Sensor' in name else (0,0,0,1)
+    )
+    sensor.data.materials.append(mat)
+    
+    return sensor
+
+def add_wiring(start_point, end_point, name, color=(0.5, 0.5, 0.5, 1)):
+    """
+    Adds wiring between two points using a Bezier curve.
+    """
+    bpy.ops.curve.primitive_bezier_curve_add()
+    curve = bpy.context.active_object
+    curve.name = name
+
+    # Set control points
+    bezier = curve.data.splines[0]
+    bezier.bezier_points[0].co = (*start_point, 1)
+    bezier.bezier_points[1].co = (*end_point, 1)
+
+    # Adjust handles for smoother curves
+    bezier.bezier_points[0].handle_right_type = 'AUTO'
+    bezier.bezier_points[1].handle_left_type = 'AUTO'
+
+    # Create and assign material
+    mat = create_material(
+        name=f"{name}Material",
+        diffuse_color=color,
+        metallic=0.6,
+        roughness=0.8,
+        transparency=0.0,
+        emission_color=(0,0,0,1)
+    )
+    curve.data.materials.append(mat)
+    
+    return curve
+
+# ------------------------------
+# Additional Component Functions
+# ------------------------------
+
+def create_glove(name, location, size, flexibility, thickness):
+    """
+    Creates a glove as a scaled and extruded mesh.
+    """
+    bpy.ops.mesh.primitive_cube_add(
+        size=1,
+        location=location
+    )
+    glove = bpy.context.active_object
+    glove.name = name
+    glove.scale = (size, size, thickness)
+    
+    # Add Flexibility Modifier (Subdivision Surface)
+    bpy.ops.object.modifier_add(type='SUBSURF')
+    glove.modifiers['Subdivision'].levels = flexibility
+    
+    # Apply modifiers
+    bpy.ops.object.modifier_apply(modifier='Subdivision')
+    
+    return glove
+
+def create_boot(name, location, size, sole_thickness, ankle_support):
+    """
+    Creates a boot as a scaled and extruded mesh with sole.
+    """
+    bpy.ops.mesh.primitive_cube_add(
+        size=1,
+        location=location
+    )
+    boot = bpy.context.active_object
+    boot.name = name
+    boot.scale = (size, size, sole_thickness)
+    
+    # Add Ankle Support as a cylinder
+    bpy.ops.mesh.primitive_cylinder_add(
+        radius=size * 0.5,
+        depth=ankle_support,
+        location=(location[0], location[1], location[2] + sole_thickness + ankle_support / 2)
+    )
+    ankle = bpy.context.active_object
+    ankle.name = f"{name} Ankle Support"
+    
+    return boot
+
+def create_exoskeleton(name, location, assistance_level, joint_type, material_thickness):
+    """
+    Creates an exoskeleton part as a thin cylinder or other shape based on joint type.
+    """
+    if joint_type == 'Hinge':
+        bpy.ops.mesh.primitive_cylinder_add(
+            radius=material_thickness,
+            depth=1.0,
+            location=location
+        )
+    elif joint_type == 'Ball':
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            radius=material_thickness,
+            location=location
+        )
+    exo_part = bpy.context.active_object
+    exo_part.name = name
+    return exo_part
+
+# ------------------------------
+# Material Assignment Functions
+# ------------------------------
+
+def create_material(name, diffuse_color, metallic=0.0, roughness=0.5, transparency=0.0, emission_color=(0,0,0,1)):
+    """
+    Creates a new material with the specified properties.
+    """
+    mat = bpy.data.materials.new(name=name)
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+
+    # Clear existing nodes
+    for node in nodes:
+        nodes.remove(node)
+    
+    # Create Principled BSDF
+    principled = nodes.new(type='ShaderNodeBsdfPrincipled')
+    principled.location = (0,0)
+    principled.inputs['Base Color'].default_value = diffuse_color
+    principled.inputs['Metallic'].default_value = metallic
+    principled.inputs['Roughness'].default_value = roughness
+    principled.inputs['Transmission'].default_value = transparency  # For transparency
+    
+    # Create Emission Shader if needed
+    if emission_color != (0,0,0,1):
+        emission = nodes.new(type='ShaderNodeEmission')
+        emission.location = (-200, -200)
+        emission.inputs['Color'].default_value = emission_color
+        emission.inputs['Strength'].default_value = 1.0
+
+        # Mix Shader
+        mix_shader = nodes.new(type='ShaderNodeMixShader')
+        mix_shader.location = (200,0)
+
+        # Link Principled BSDF and Emission to Mix Shader
+        links.new(principled.outputs['BSDF'], mix_shader.inputs[1])
+        links.new(emission.outputs['Emission'], mix_shader.inputs[2])
+
+        # Create Material Output
+        material_output = nodes.new(type='ShaderNodeOutputMaterial')
+        material_output.location = (400,0)
+
+        # Link Mix Shader to Material Output
+        links.new(mix_shader.outputs['Shader'], material_output.inputs['Surface'])
+    else:
+        # Create Material Output
+        material_output = nodes.new(type='ShaderNodeOutputMaterial')
+        material_output.location = (200,0)
+
+        # Link Principled BSDF to Material Output
+        links.new(principled.outputs['BSDF'], material_output.inputs['Surface'])
+
+    return mat
+
+def assign_materials_to_layers():
+    """
+    Assigns materials to each suit layer and additional components based on their names.
+    """
+    materials = {
+        "Ballistic Layer": {
+            "diffuse_color": (0.8, 0.1, 0.1, 1),  # Red
+            "metallic": 0.2,
+            "roughness": 0.5
+        },
+        "Chemical Layer": {
+            "diffuse_color": (0.1, 0.8, 0.1, 1),  # Green
+            "metallic": 0.1,
+            "roughness": 0.6
+        },
+        "Thermal Layer": {
+            "diffuse_color": (0.1, 0.1, 0.8, 1),  # Blue
+            "metallic": 0.3,
+            "roughness": 0.4
+        },
+        "Radiation Layer": {
+            "diffuse_color": (0.8, 0.8, 0.1, 1),  # Yellow
+            "metallic": 0.0,
+            "roughness": 0.2,
+            "emission_color": (1, 1, 0, 1)  # Glowing effect
+        },
+        "Helmet": {
+            "diffuse_color": (0.9, 0.9, 0.9, 1),  # Light Grey
+            "metallic": 0.8,
+            "roughness": 0.3
+        },
+        "Visor": {
+            "diffuse_color": (0.5, 0.5, 0.5, 0.3),  # Semi-transparent Grey
+            "metallic": 0.0,
+            "roughness": 0.0,
+            "transparency": 0.7
+        },
+        "Glove Left": {
+            "diffuse_color": (0.1, 0.1, 0.8, 1),  # Blue
+            "metallic": 0.2,
+            "roughness": 0.5
+        },
+        "Glove Right": {
+            "diffuse_color": (0.1, 0.1, 0.8, 1),
+            "metallic": 0.2,
+            "roughness": 0.5
+        },
+        "Boot Left": {
+            "diffuse_color": (0.2, 0.2, 0.2, 1),  # Dark Grey
+            "metallic": 0.5,
+            "roughness": 0.7
+        },
+        "Boot Right": {
+            "diffuse_color": (0.2, 0.2, 0.2, 1),
+            "metallic": 0.5,
+            "roughness": 0.7
+        },
+        "Exo Torso": {
+            "diffuse_color": (0.8, 0.8, 0.8, 1),  # Light Grey
+            "metallic": 0.9,
+            "roughness": 0.3
+        },
+        "Exo Upper Arm Left": {
+            "diffuse_color": (0.8, 0.8, 0.8, 1),
+            "metallic": 0.9,
+            "roughness": 0.3
+        },
+        "Exo Upper Arm Right": {
+            "diffuse_color": (0.8, 0.8, 0.8, 1),
+            "metallic": 0.9,
+            "roughness": 0.3
+        },
+        "Heart Rate Sensor": {
+            "diffuse_color": (1, 0, 0, 1),  # Red
+            "emission_color": (1, 0, 0, 1)
+        },
+        "Temperature Sensor 1": {
+            "diffuse_color": (1, 0.5, 0, 1),  # Orange
+            "emission_color": (1, 0.5, 0, 1)
+        },
+        "Temperature Sensor 2": {
+            "diffuse_color": (1, 0.5, 0, 1),
+            "emission_color": (1, 0.5, 0, 1)
+        },
+        "Temperature Sensor 3": {
+            "diffuse_color": (1, 0.5, 0, 1),
+            "emission_color": (1, 0.5, 0, 1)
+        },
+        "Wiring Heart to Temp1": {
+            "diffuse_color": (0.5, 0.5, 0.5, 1),  # Grey
+            "metallic": 0.6,
+            "roughness": 0.8
+        },
+        "Wiring Heart to Temp2": {
+            "diffuse_color": (0.5, 0.5, 0.5, 1),
+            "metallic": 0.6,
+            "roughness": 0.8
+        },
+        "Wiring Heart to Temp3": {
+            "diffuse_color": (0.5, 0.5, 0.5, 1),
+            "metallic": 0.6,
+            "roughness": 0.8
+        }
+    }
+
+    for obj_name, props in materials.items():
+        obj = bpy.data.objects.get(obj_name)
+        if obj:
+            mat = create_material(
+                name=f"{obj_name}Material",
+                diffuse_color=props.get("diffuse_color", (1,1,1,1)),
+                metallic=props.get("metallic", 0.0),
+                roughness=props.get("roughness", 0.5),
+                transparency=props.get("transparency", 0.0),
+                emission_color=props.get("emission_color", (0,0,0,1))
+            )
+            obj.data.materials.append(mat)
+
+# ------------------------------
+# Main Suit Creation Function
+# ------------------------------
+
+def create_suit(params):
+    """
+    Main function to create the protective suit based on provided parameters.
+    """
+    # Unpack anthropometric variables
+    H = params['height']
+    C_c = params['chest_circumference']
+    C_w = params['waist_circumference']
+    C_h = params['hip_circumference']
+    L_a = params['arm_length']
+    L_l = params['leg_length']
+    C_hd = params['head_circumference']
+    W_s = params['shoulder_width']
+    L_h = params['hand_length']
+    W_h = params['hand_width']
+    L_f = params['foot_length']
+    W_f = params['foot_width']
+    
+    # Protection Parameters
+    B_p = params['ballistic_protection']
+    C_p = params['chemical_protection']
+    T_p = params['thermal_protection']
+    R_p = params['radiation_protection']
+    
+    # Create Torso
+    torso = create_torso(H, C_c, C_w, C_h, L_l)
+    
+    # Create Suit Layers
+    thickness_ballistic = 0.02 if B_p == "Level IV" else 0.01
+    thickness_chemical = 0.005 if C_p == "Type 1" else 0.002
+    thickness_thermal = 0.01 if T_p == "High" else 0.005
+    thickness_radiation = 0.005 if R_p == "Standard" else 0.01
+    
+    ballistic_layer = add_suit_layer(torso, thickness_ballistic, "Ballistic Layer")
+    chemical_layer = add_suit_layer(ballistic_layer, thickness_chemical, "Chemical Layer")
+    thermal_layer = add_suit_layer(chemical_layer, thickness_thermal, "Thermal Layer")
+    radiation_layer = add_suit_layer(thermal_layer, thickness_radiation, "Radiation Layer")
+    
+    # Create Limbs
+    upper_arm_radius = W_s / 8
+    lower_arm_radius = upper_arm_radius * 0.8
+    thigh_radius = W_s / 6
+    calf_radius = thigh_radius * 0.8
+    
+    # Left Upper Arm
+    left_upper_arm = create_limb(
+        name="Upper Arm Left",
+        length=L_a,
+        radius=upper_arm_radius,
+        location=(W_s / 2, 0, torso.location.z + torso.dimensions.z / 2 - L_a / 2)
+    )
+    
+    # Right Upper Arm
+    right_upper_arm = create_limb(
+        name="Upper Arm Right",
+        length=L_a,
+        radius=upper_arm_radius,
+        location=(-W_s / 2, 0, torso.location.z + torso.dimensions.z / 2 - L_a / 2)
+    )
+    
+    # Left Lower Arm
+    left_lower_arm = create_limb(
+        name="Lower Arm Left",
+        length=L_a * 0.8,
+        radius=lower_arm_radius,
+        location=(left_upper_arm.location.x, left_upper_arm.location.y, left_upper_arm.location.z - L_a / 2 - (L_a * 0.8) / 2)
+    )
+    
+    # Right Lower Arm
+    right_lower_arm = create_limb(
+        name="Lower Arm Right",
+        length=L_a * 0.8,
+        radius=lower_arm_radius,
+        location=(right_upper_arm.location.x, right_upper_arm.location.y, right_upper_arm.location.z - L_a / 2 - (L_a * 0.8) / 2)
+    )
+    
+    # Create Hands
+    left_hand = create_hand(
+        name="Hand Left",
+        location=(left_lower_arm.location.x, left_lower_arm.location.y, left_lower_arm.location.z - (L_a * 0.8) / 2 - L_h / 2),
+        length=L_h,
+        width=W_h
+    )
+    
+    right_hand = create_hand(
+        name="Hand Right",
+        location=(right_lower_arm.location.x, right_lower_arm.location.y, right_lower_arm.location.z - (L_a * 0.8) / 2 - L_h / 2),
+        length=L_h,
+        width=W_h
+    )
+    
+    # Create Legs
+    # Left Thigh
+    left_thigh = create_limb(
+        name="Thigh Left",
+        length=L_l,
+        radius=thigh_radius,
+        location=(W_s / 4, 0, L_l / 2)
+    )
+    
+    # Right Thigh
+    right_thigh = create_limb(
+        name="Thigh Right",
+        length=L_l,
+        radius=thigh_radius,
+        location=(-W_s / 4, 0, L_l / 2)
+    )
+    
+    # Left Calf
+    left_calf = create_limb(
+        name="Calf Left",
+        length=L_l * 0.9,
+        radius=calf_radius,
+        location=(left_thigh.location.x, left_thigh.location.y, left_thigh.location.z - L_l / 2 - (L_l * 0.9) / 2)
+    )
+    
+    # Right Calf
+    right_calf = create_limb(
+        name="Calf Right",
+        length=L_l * 0.9,
+        radius=calf_radius,
+        location=(right_thigh.location.x, right_thigh.location.y, right_thigh.location.z - L_l / 2 - (L_l * 0.9) / 2)
+    )
+    
+    # Create Feet
+    left_foot = create_foot(
+        name="Foot Left",
+        location=(left_calf.location.x, left_calf.location.y, left_calf.location.z - (L_l * 0.9) / 2 - L_f / 2),
+        length=L_f,
+        width=W_f
+    )
+    
+    right_foot = create_foot(
+        name="Foot Right",
+        location=(right_calf.location.x, right_calf.location.y, right_calf.location.z - (L_l * 0.9) / 2 - L_f / 2),
+        length=L_f,
+        width=W_f
+    )
+    
+    # Create Head
+    head = create_head(
+        circumference=C_hd,
+        location=(0, 0, H - (C_hd / (2 * math.pi)))
+    )
+    
+    # Create Helmet
+    helmet = add_suit_layer(head, 0.01, "Helmet")
+    
+    # Create Visor
+    bpy.ops.mesh.primitive_plane_add(
+        size=1,
+        location=(0, (C_hd / (2 * math.pi)) - 0.01, head.location.z + (C_hd / (2 * math.pi)) * 0.8)
+    )
+    visor = bpy.context.active_object
+    visor.name = "Visor"
+    visor.scale = ( (C_hd / (2 * math.pi)) * 0.6, 0.01, (C_hd / (2 * math.pi)) * 0.3 )
+    visor.rotation_euler = (math.radians(90), 0, 0)
+    
+    # Assign Material to Visor (Semi-transparent)
+    visor_mat = create_material(
+        name="VisorMaterial",
+        diffuse_color=(0.5, 0.5, 0.5, 0.3),
+        metallic=0.0,
+        roughness=0.0,
+        transparency=0.7,
+        emission_color=(0,0,0,1)
+    )
+    visor.data.materials.append(visor_mat)
+    
+    # Create Sensors
+    # Heart Rate Sensor
+    chest_z = torso.location.z + torso.dimensions.z / 2
+    heart_sensor_location = (0, 0, chest_z)
+    heart_sensor = add_sensor("Heart Rate Sensor", heart_sensor_location)
+    
+    # Temperature Sensors along Arms
+    temperature_sensor_positions = [
+        (W_s / 2 + 0.05, 0, torso.location.z + torso.dimensions.z / 2 - L_a / 2 + 0.2),
+        (-W_s / 2 - 0.05, 0, torso.location.z + torso.dimensions.z / 2 - L_a / 2 + 0.2),
+        (0, 0, torso.location.z + torso.dimensions.z / 2 - L_a / 2 + 0.2)
+    ]
+    
+    for i, pos in enumerate(temperature_sensor_positions, start=1):
+        sensor_name = f"Temperature Sensor {i}"
+        add_sensor(sensor_name, pos)
+    
+    # Create Wiring
+    wiring_names = [
+        ("Wiring Heart to Temp1", heart_sensor_location, temperature_sensor_positions[0]),
+        ("Wiring Heart to Temp2", heart_sensor_location, temperature_sensor_positions[1]),
+        ("Wiring Heart to Temp3", heart_sensor_location, temperature_sensor_positions[2])
+    ]
+    
+    for name, start, end in wiring_names:
+        add_wiring(start, end, name)
+    
+    # Create Gloves
+    glove_size = W_h
+    glove_flexibility = params['flexibility_requirement']
+    glove_thickness = 0.005  # Example thickness
+    
+    left_glove = create_glove(
+        name="Glove Left",
+        location=(left_hand.location.x, left_hand.location.y + glove_size + 0.02, left_hand.location.z),
+        size=glove_size,
+        flexibility=glove_flexibility,
+        thickness=glove_thickness
+    )
+    
+    right_glove = create_glove(
+        name="Glove Right",
+        location=(right_hand.location.x, right_hand.location.y - glove_size - 0.02, right_hand.location.z),
+        size=glove_size,
+        flexibility=glove_flexibility,
+        thickness=glove_thickness
+    )
+    
+    # Create Boots
+    boot_size = W_f
+    sole_thickness = 0.02
+    ankle_support = 0.15
+    
+    left_boot = create_boot(
+        name="Boot Left",
+        location=(left_foot.location.x, left_foot.location.y, left_foot.location.z - sole_thickness / 2),
+        size=boot_size,
+        sole_thickness=sole_thickness,
+        ankle_support=ankle_support
+    )
+    
+    right_boot = create_boot(
+        name="Boot Right",
+        location=(right_foot.location.x, right_foot.location.y, right_foot.location.z - sole_thickness / 2),
+        size=boot_size,
+        sole_thickness=sole_thickness,
+        ankle_support=ankle_support
+    )
+    
+    # Create Exoskeleton Parts
+    exo_assistance = params['exoskeleton_assistance']
+    joint_type = 'Hinge'  # Example joint type
+    material_thickness = 0.005
+    
+    # Exo Torso
+    torso_exo = create_exoskeleton(
+        name="Exo Torso",
+        location=(torso.location.x, torso.location.y, torso.location.z),
+        assistance_level=exo_assistance,
+        joint_type=joint_type,
+        material_thickness=material_thickness
+    )
+    
+    # Exo Upper Arms
+    left_arm_exo = create_exoskeleton(
+        name="Exo Upper Arm Left",
+        location=(left_upper_arm.location.x, left_upper_arm.location.y, left_upper_arm.location.z),
+        assistance_level=exo_assistance,
+        joint_type=joint_type,
+        material_thickness=material_thickness
+    )
+    
+    right_arm_exo = create_exoskeleton(
+        name="Exo Upper Arm Right",
+        location=(right_upper_arm.location.x, right_upper_arm.location.y, right_upper_arm.location.z),
+        assistance_level=exo_assistance,
+        joint_type=joint_type,
+        material_thickness=material_thickness
+    )
+    
+    # Assign Materials to Layers and Components
+    assign_materials_to_layers()
+    
+    print("Protective suit created successfully.")
+
+# ------------------------------
+# User Interface (UI) Panel
+# ------------------------------
+
+class GenerateSuitOperator(bpy.types.Operator):
+    bl_idname = "object.generate_suit"
+    bl_label = "Generate Suit"
+    bl_description = "Generate the protective suit based on input parameters"
+
+    def execute(self, context):
+        # Retrieve properties from the scene
+        params = {
+            'height': context.scene.body_height,
+            'chest_circumference': context.scene.chest_circumference,
+            'waist_circumference': context.scene.waist_circumference,
+            'hip_circumference': context.scene.hip_circumference,
+            'arm_length': context.scene.arm_length,
+            'leg_length': context.scene.leg_length,
+            'head_circumference': context.scene.head_circumference,
+            'shoulder_width': context.scene.shoulder_width,
+            'hand_length': context.scene.hand_length,
+            'hand_width': context.scene.hand_width,
+            'foot_length': context.scene.foot_length,
+            'foot_width': context.scene.foot_width,
+            'ballistic_protection': context.scene.ballistic_protection,
+            'chemical_protection': context.scene.chemical_protection,
+            'thermal_protection': context.scene.thermal_protection,
+            'radiation_protection': context.scene.radiation_protection,
+            'flexibility_requirement': context.scene.flexibility_requirement,
+            'weight_limit': context.scene.weight_limit,
+            'exoskeleton_assistance': context.scene.exoskeleton_assistance
+        }
+        
+        try:
+            # Clear existing objects to avoid duplication
+            bpy.ops.object.select_all(action='SELECT')
+            bpy.ops.object.delete(use_global=False)
+            
+            # Create the suit
+            create_suit(params)
+            self.report({'INFO'}, "Protective suit generated successfully.")
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to generate suit: {str(e)}")
+        
+        return {'FINISHED'}
+
+class SuitParametersPanel(bpy.types.Panel):
+    bl_label = "Suit Parameters"
+    bl_idname = "OBJECT_PT_suit_parameters"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Suit Design'
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+
+        # Anthropometric Variables
+        layout.label(text="Body Measurements:")
+        layout.prop(scene, "body_height")
+        layout.prop(scene, "chest_circumference")
+        layout.prop(scene, "waist_circumference")
+        layout.prop(scene, "hip_circumference")
+        layout.prop(scene, "arm_length")
+        layout.prop(scene, "leg_length")
+        layout.prop(scene, "head_circumference")
+        layout.prop(scene, "shoulder_width")
+        layout.prop(scene, "hand_length")
+        layout.prop(scene, "hand_width")
+        layout.prop(scene, "foot_length")
+        layout.prop(scene, "foot_width")
+
+        # Protection Levels
+        layout.separator()
+        layout.label(text="Protection Levels:")
+        layout.prop(scene, "ballistic_protection")
+        layout.prop(scene, "chemical_protection")
+        layout.prop(scene, "thermal_protection")
+        layout.prop(scene, "radiation_protection")
+
+        # Mobility and Comfort
+        layout.separator()
+        layout.label(text="Mobility and Comfort:")
+        layout.prop(scene, "flexibility_requirement")
+        layout.prop(scene, "weight_limit")
+        layout.prop(scene, "exoskeleton_assistance")
+
+        # Generate Button
+        layout.separator()
+        layout.operator("object.generate_suit", text="Generate Suit")
+
+# ------------------------------
+# Registration
+# ------------------------------
+
+def register():
+    bpy.utils.register_class(GenerateSuitOperator)
+    bpy.utils.register_class(SuitParametersPanel)
+    
+    # Define properties
+    bpy.types.Scene.body_height = bpy.props.FloatProperty(
+        name="Height (m)",
+        description="Total body height in meters",
+        default=1.80,
+        min=0.5,
+        max=2.5
+    )
+    bpy.types.Scene.chest_circumference = bpy.props.FloatProperty(
+        name="Chest Circumference (m)",
+        description="Chest circumference in meters",
+        default=1.00,
+        min=0.5,
+        max=2.0
+    )
+    bpy.types.Scene.waist_circumference = bpy.props.FloatProperty(
+        name="Waist Circumference (m)",
+        description="Waist circumference in meters",
+        default=0.85,
+        min=0.5,
+        max=2.0
+    )
+    bpy.types.Scene.hip_circumference = bpy.props.FloatProperty(
+        name="Hip Circumference (m)",
+        description="Hip circumference in meters",
+        default=1.00,
+        min=0.5,
+        max=2.0
+    )
+    bpy.types.Scene.arm_length = bpy.props.FloatProperty(
+        name="Arm Length (m)",
+        description="Arm length in meters",
+        default=0.60,
+        min=0.3,
+        max=1.2
+    )
+    bpy.types.Scene.leg_length = bpy.props.FloatProperty(
+        name="Leg Length (m)",
+        description="Leg length in meters",
+        default=0.90,
+        min=0.4,
+        max=2.5
+    )
+    bpy.types.Scene.head_circumference = bpy.props.FloatProperty(
+        name="Head Circumference (m)",
+        description="Head circumference in meters",
+        default=0.56,
+        min=0.4,
+        max=0.7
+    )
+    bpy.types.Scene.shoulder_width = bpy.props.FloatProperty(
+        name="Shoulder Width (m)",
+        description="Shoulder width in meters",
+        default=0.45,
+        min=0.3,
+        max=1.0
+    )
+    bpy.types.Scene.hand_length = bpy.props.FloatProperty(
+        name="Hand Length (m)",
+        description="Hand length in meters",
+        default=0.18,
+        min=0.1,
+        max=0.3
+    )
+    bpy.types.Scene.hand_width = bpy.props.FloatProperty(
+        name="Hand Width (m)",
+        description="Hand width in meters",
+        default=0.09,
+        min=0.05,
+        max=0.2
+    )
+    bpy.types.Scene.foot_length = bpy.props.FloatProperty(
+        name="Foot Length (m)",
+        description="Foot length in meters",
+        default=0.26,
+        min=0.1,
+        max=0.4
+    )
+    bpy.types.Scene.foot_width = bpy.props.FloatProperty(
+        name="Foot Width (m)",
+        description="Foot width in meters",
+        default=0.10,
+        min=0.05,
+        max=0.3
+    )
+    bpy.types.Scene.ballistic_protection = bpy.props.EnumProperty(
+        name="Ballistic Protection",
+        description="Select ballistic protection level",
+        items=[
+            ('Level II', "Level II", ""),
+            ('Level III', "Level III", ""),
+            ('Level IV', "Level IV", "")
+        ],
+        default='Level IV'
+    )
+    bpy.types.Scene.chemical_protection = bpy.props.EnumProperty(
+        name="Chemical Protection",
+        description="Select chemical protection type",
+        items=[
+            ('Type 1', "Type 1", ""),
+            ('Type 2', "Type 2", "")
+        ],
+        default='Type 1'
+    )
+    bpy.types.Scene.thermal_protection = bpy.props.EnumProperty(
+        name="Thermal Protection",
+        description="Select thermal protection level",
+        items=[
+            ('Low', "Low", ""),
+            ('High', "High", "")
+        ],
+        default='High'
+    )
+    bpy.types.Scene.radiation_protection = bpy.props.EnumProperty(
+        name="Radiation Protection",
+        description="Select radiation protection level",
+        items=[
+            ('Standard', "Standard", ""),
+            ('Enhanced', "Enhanced", "")
+        ],
+        default='Standard'
+    )
+    bpy.types.Scene.flexibility_requirement = bpy.props.IntProperty(
+        name="Flexibility Requirement",
+        description="Flexibility on a scale of 1-10",
+        default=7,
+        min=1,
+        max=10
+    )
+    bpy.types.Scene.weight_limit = bpy.props.FloatProperty(
+        name="Weight Limit (kg)",
+        description="Maximum weight the suit can handle",
+        default=30.0,
+        min=0.0,
+        max=100.0
+    )
+    bpy.types.Scene.exoskeleton_assistance = bpy.props.IntProperty(
+        name="Exoskeleton Assistance Level",
+        description="Assistance level on a scale of 0-10",
+        default=5,
+        min=0,
+        max=10
+    )
+
+def unregister():
+    bpy.utils.unregister_class(GenerateSuitOperator)
+    bpy.utils.unregister_class(SuitParametersPanel)
+    
+    # Delete properties
+    del bpy.types.Scene.body_height
+    del bpy.types.Scene.chest_circumference
+    del bpy.types.Scene.waist_circumference
+    del bpy.types.Scene.hip_circumference
+    del bpy.types.Scene.arm_length
+    del bpy.types.Scene.leg_length
+    del bpy.types.Scene.head_circumference
+    del bpy.types.Scene.shoulder_width
+    del bpy.types.Scene.hand_length
+    del bpy.types.Scene.hand_width
+    del bpy.types.Scene.foot_length
+    del bpy.types.Scene.foot_width
+    del bpy.types.Scene.ballistic_protection
+    del bpy.types.Scene.chemical_protection
+    del bpy.types.Scene.thermal_protection
+    del bpy.types.Scene.radiation_protection
+    del bpy.types.Scene.flexibility_requirement
+    del bpy.types.Scene.weight_limit
+    del bpy.types.Scene.exoskeleton_assistance
+
+# ------------------------------
+# Registration Call
+# ------------------------------
+
+if __name__ == "__main__":
+    register()
